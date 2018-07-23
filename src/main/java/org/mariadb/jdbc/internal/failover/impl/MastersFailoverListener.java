@@ -292,6 +292,7 @@ public class MastersFailoverListener extends AbstractMastersListener {
      * @throws SQLException if reconnect a new connection but there was an active transaction.
      */
     public void reconnect() throws SQLException {
+        System.out.println("Master failover listener reconnect");
         boolean inTransaction = currentProtocol != null && currentProtocol.inTransaction();
         reconnectFailedConnection(new SearchFilter(true, false));
         handleFailLoop();

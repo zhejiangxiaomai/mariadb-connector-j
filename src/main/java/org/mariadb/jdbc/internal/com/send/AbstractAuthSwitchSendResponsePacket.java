@@ -54,6 +54,7 @@ package org.mariadb.jdbc.internal.com.send;
 
 import org.mariadb.jdbc.internal.com.read.Buffer;
 import org.mariadb.jdbc.internal.com.read.ErrorPacket;
+import org.mariadb.jdbc.internal.com.read.OkPacket;
 import org.mariadb.jdbc.internal.io.input.PacketInputStream;
 
 import java.io.IOException;
@@ -96,5 +97,28 @@ public abstract class AbstractAuthSwitchSendResponsePacket implements InterfaceA
             String message = ep.getMessage();
             throw new SQLException("Could not connect: " + message, ep.getSqlState(), ep.getErrorNumber());
         }
+    }
+    
+    /**
+     * Handle response packet with msg.
+     *
+     * @param reader packet fetcher
+     * @param msg return redirection info
+     * @throws SQLException if any functional error occur
+     * @throws IOException  if any connection error occur
+     */
+    public void handleResultPacket(PacketInputStream reader, OkPacket msg) throws SQLException, IOException {
+        Buffer buffer = reader.getPacket(true);
+        if (buffer.getByteAt(0) == ERROR) {
+            ErrorPacket ep = new ErrorPacket(buffer);
+            String message = ep.getMessage();
+            throw new SQLException("Could not connect: " + message, ep.getSqlState(), ep.getErrorNumber());
+        } else {
+            OkPacket tmp = new OkPacket(buffer);
+            msg.setHost(tmp.getHost());
+            msg.setPort(tmp.getPort());
+            msg.setUser(tmp.getUser());
+            msg.setTtl(tmp.getTtl());
+        }  
     }
 }

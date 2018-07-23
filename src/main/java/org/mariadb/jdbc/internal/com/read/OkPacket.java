@@ -52,13 +52,19 @@
 
 package org.mariadb.jdbc.internal.com.read;
 
+import java.nio.charset.Charset;
+import java.sql.SQLException;
+
 public class OkPacket {
 
     private final long affectedRows;
     private final long insertId;
     private final short serverStatus;
     private final short warnings;
-
+    private String host;
+    private int port;
+    private String user;
+    private int ttl;
     /**
      * Read Ok stream result.
      *
@@ -70,8 +76,28 @@ public class OkPacket {
         insertId = buffer.getLengthEncodedNumeric();
         serverStatus = buffer.readShort();
         warnings = buffer.readShort();
+        String serverInfo = "";
+        if (buffer.remaining() >= 0) {
+            serverInfo = buffer.readStringLengthEncoded(Charset.forName("ASCII"));
+        }
+        parseServerInfo(serverInfo);
     }
 
+    /**
+     * Just for initial.
+     *
+     */
+    public OkPacket() {
+        affectedRows = -1;
+        insertId = -1;
+        serverStatus = -1;
+        warnings = -1;
+        host = "";
+        port = -1;
+        user = "";
+        ttl = -2;
+    }
+    
     @Override
     public String toString() {
         return "affectedRows = "
@@ -81,7 +107,15 @@ public class OkPacket {
                 + "&serverStatus="
                 + serverStatus
                 + "&warnings="
-                + warnings;
+                + warnings
+                + "&host="
+                + host
+                + "&port="
+                + port
+                + "&user="
+                + user
+                + "&ttl="
+                + ttl;
     }
 
     public long getAffectedRows() {
@@ -99,5 +133,63 @@ public class OkPacket {
     public short getWarnings() {
         return warnings;
     }
+    /**
+     * get mariadb server information.
+     * @param str   message about server information
+     */
+    public void parseServerInfo(String str) {
+        if (str.length() >= 18) {
+            // host
+            str = str.substring(18);
+            int beginIdx = 0;
+            int endIdx = str.indexOf(':');
+            host = str.substring(beginIdx, endIdx);
+            //port
+            beginIdx = endIdx + 1;
+            endIdx = str.indexOf('/');
+            port = Integer.parseInt(str.substring(beginIdx, endIdx));
 
+            beginIdx = str.indexOf('=') + 1;
+            user = str.substring(beginIdx); //, end_idx
+            ttl = -2;
+        } else {
+            // if no cloud server info, then inital it 
+            host = "";
+            port = -1;
+            user = "";
+            ttl = -2;
+        }
+    }
+    
+    public String getHost() {
+        return host;
+    }
+    
+    public int getPort() {
+        return port;
+    }
+    
+    public String getUser() {
+        return user;
+    }
+    
+    public int getTtl() {
+        return ttl;
+    }
+
+    public void setHost(String host) {
+        this.host = host;
+    }
+
+    public void setPort(int port) {
+        this.port = port;
+    }
+
+    public void setUser(String user) {
+        this.user = user;
+    }
+
+    public void setTtl(int ttl) {
+        this.ttl = ttl;
+    }
 }

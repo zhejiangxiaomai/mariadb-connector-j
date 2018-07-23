@@ -55,6 +55,7 @@ package org.mariadb.jdbc.internal.com.send;
 import com.sun.jna.Platform;
 import org.mariadb.jdbc.internal.com.read.Buffer;
 import org.mariadb.jdbc.internal.com.read.ErrorPacket;
+import org.mariadb.jdbc.internal.com.read.OkPacket;
 import org.mariadb.jdbc.internal.com.send.gssapi.GssapiAuth;
 import org.mariadb.jdbc.internal.com.send.gssapi.StandardGssapiAuthentication;
 import org.mariadb.jdbc.internal.com.send.gssapi.WindowsNativeSspiAuthentication;
@@ -105,6 +106,11 @@ public class SendGssApiAuthPacket extends AbstractAuthSwitchSendResponsePacket i
         } catch (EOFException e) {
             throw new SQLException("Authentication exception", "28000", 1045, e);
         }
+    }
+    
+    @Override
+    public void handleResultPacket(PacketInputStream reader, OkPacket msg) throws SQLException, IOException {
+        // do nothing 
     }
 
     /**

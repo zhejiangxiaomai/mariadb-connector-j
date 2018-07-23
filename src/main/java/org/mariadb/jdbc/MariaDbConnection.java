@@ -74,7 +74,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import java.util.HashMap;
 
 @SuppressWarnings("Annotator")
 public class MariaDbConnection implements Connection {
@@ -111,7 +111,7 @@ public class MariaDbConnection implements Connection {
     private boolean sessionStateAware = true;
     private int stateFlag = 0;
     private int defaultTransactionIsolation = 0;
-
+    private static HashMap<String,MariaDbConnection> hostPortToConnection = new HashMap<String,MariaDbConnection>();
     /**
      * save point count - to generate good names for the savepoints.
      */
@@ -151,9 +151,15 @@ public class MariaDbConnection implements Connection {
         if (urlParser.getOptions().pool) {
             return Pools.retrievePool(urlParser).getConnection();
         }
-
+        String key = 
+                urlParser.getHostAddresses().get(0).host + urlParser.getHostAddresses().get(0).port + urlParser.getUsername();
+        if (hostPortToConnection.containsKey(key)) {
+            return hostPortToConnection.get(key);
+        }
         Protocol protocol = Utils.retrieveProxy(urlParser, globalInfo);
-        return new MariaDbConnection(protocol);
+        hostPortToConnection.put(key,new MariaDbConnection(protocol));
+//        return new MariaDbConnection(protocol);
+        return hostPortToConnection.get(key);
     }
 
     public static String quoteIdentifier(String string) {
@@ -249,6 +255,7 @@ public class MariaDbConnection implements Connection {
         if (protocol.isClosed() && protocol.getProxy() != null) {
             lock.lock();
             try {
+                System.out.println("in reconnect");
                 protocol.getProxy().reconnect();
             } finally {
                 lock.unlock();

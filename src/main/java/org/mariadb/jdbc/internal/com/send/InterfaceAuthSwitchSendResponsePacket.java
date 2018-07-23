@@ -52,6 +52,7 @@
 
 package org.mariadb.jdbc.internal.com.send;
 
+import org.mariadb.jdbc.internal.com.read.OkPacket;
 import org.mariadb.jdbc.internal.io.input.PacketInputStream;
 
 import java.io.IOException;
@@ -60,4 +61,6 @@ import java.sql.SQLException;
 
 public interface InterfaceAuthSwitchSendResponsePacket extends InterfaceSendPacket {
     void handleResultPacket(PacketInputStream reader) throws SQLException, IOException;
+    
+    void handleResultPacket(PacketInputStream reader, OkPacket msg) throws SQLException, IOException;
 }

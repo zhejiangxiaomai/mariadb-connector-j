@@ -54,6 +54,7 @@ package org.mariadb.jdbc.internal.com.send;
 
 import org.mariadb.jdbc.internal.com.read.Buffer;
 import org.mariadb.jdbc.internal.com.read.ErrorPacket;
+import org.mariadb.jdbc.internal.com.read.OkPacket;
 import org.mariadb.jdbc.internal.io.input.PacketInputStream;
 import org.mariadb.jdbc.internal.io.output.PacketOutputStream;
 
@@ -191,7 +192,10 @@ public class SendPamAuthPacket extends AbstractAuthSwitchSendResponsePacket impl
         //do nothing, since the OK packet has already been read in the send conversation
     }
 
-
+    @Override
+    public void handleResultPacket(PacketInputStream reader, OkPacket msg) throws SQLException, IOException {
+        //do nothing, since the OK packet has already been read in the send conversation
+    }
     /**
      * Force focus to input field.
      */
