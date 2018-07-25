@@ -384,7 +384,6 @@ public class FailoverProxy implements InvocationHandler {
      * @throws SQLException exception
      */
     public void reconnect() throws SQLException {
-        System.out.println("Failover proxy");
         try {
             listener.reconnect();
         } catch (SQLException e) {

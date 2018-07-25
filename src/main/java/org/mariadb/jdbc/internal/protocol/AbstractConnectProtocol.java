@@ -121,8 +121,8 @@ public abstract class AbstractConnectProtocol implements Protocol {
     private static final byte[] IS_MASTER_QUERY = "show global variables like 'innodb_read_only'".getBytes(StandardCharsets.UTF_8);
     private static final Logger logger = LoggerFactory.getLogger(AbstractConnectProtocol.class);
     protected final ReentrantLock lock;
-    protected final UrlParser urlParser;
     protected final Options options;
+    protected final UrlParser urlParser;
     private final String username;
     private final String password;
     public boolean hasWarnings = false;
@@ -478,7 +478,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
             
             handleConnectionPhases(host);
             // redirection
-            if (options.useSsl && mariadbHost != null) {
+            if (options.useSsl && mariadbHost != null && mariadbHost.host != currentHost.host && mariadbHost.port != currentHost.port) {
                 socketToServer =  SocketFactory.getDefault().createSocket();
                 if (options.socketTimeout != null) socketToServer.setSoTimeout(options.socketTimeout);
                 initializeServerSocketOption();
@@ -492,11 +492,15 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         }
                     }
                     // if success
-                    redirecthandleConnectionPhases(mariadbHost.host);
+                    redirectHandleConnectionPhases(mariadbHost.host);
                     closeSocket(reader, writer, socket);
                     reader = readerToServer;
                     writer = writerToServer;
                     socket = socketToServer;
+                    String key = 
+                            urlParser.getHostAddresses().get(0).host + "_" 
+                            + urlParser.getHostAddresses().get(0).port + "_" + urlParser.getUsername();
+                    MariaDbConnection.putNewConnection(key, this);
                 } catch (SQLException e) {
                     // close redirection connection and socket
                     closeSocket(readerToServer, writerToServer, socketToServer);
@@ -758,7 +762,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
      * @param host   redirection host.
      * @throws SQLException    exception.
      */
-    private void redirecthandleConnectionPhases(String host) throws SQLException {
+    private void redirectHandleConnectionPhases(String host) throws SQLException {
         try {
             readerToServer = new StandardPacketInputStream(socketToServer.getInputStream(), options.maxQuerySizeToLog);
             writerToServer = new StandardPacketOutputStream(socketToServer.getOutputStream(), options.maxQuerySizeToLog);
@@ -905,7 +909,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
                             X509Certificate cert = (X509Certificate) certs[0];
                             hostnameVerifier.verify(host, cert, serverThreadId);
                         } catch (SSLException ex) {
-                            throw new SQLNonTransientConnectionException("```````SSL hostname verification failed : " + ex.getMessage()
+                            throw new SQLNonTransientConnectionException("SSL hostname verification failed : " + ex.getMessage()
                                     + "\nThis verification can be disabled using the option \"disableSslHostnameVerification\" "
                                     + "but won't prevent man-in-the-middle attacks anymore", "08006");
                         }

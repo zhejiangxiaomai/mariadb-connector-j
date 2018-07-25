@@ -822,7 +822,6 @@ public class MastersSlavesListener extends AbstractMastersSlavesListener {
      * @throws SQLException if reconnection has failed
      */
     public void reconnect() throws SQLException {
-        System.out.println("slave listener reconnect");
         SearchFilter filter;
         boolean inTransaction = false;
         if (currentReadOnlyAsked) {

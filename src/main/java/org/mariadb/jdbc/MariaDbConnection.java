@@ -70,11 +70,12 @@ import java.sql.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.HashMap;
+
 
 @SuppressWarnings("Annotator")
 public class MariaDbConnection implements Connection {
@@ -111,7 +112,7 @@ public class MariaDbConnection implements Connection {
     private boolean sessionStateAware = true;
     private int stateFlag = 0;
     private int defaultTransactionIsolation = 0;
-    private static HashMap<String,MariaDbConnection> hostPortToConnection = new HashMap<String,MariaDbConnection>();
+    private static ConcurrentHashMap<String,MariaDbConnection> hostPortToConnection = new ConcurrentHashMap<String,MariaDbConnection>();
     /**
      * save point count - to generate good names for the savepoints.
      */
@@ -122,6 +123,16 @@ public class MariaDbConnection implements Connection {
     private final Options options;
     private boolean warningsCleared;
 
+    /**
+     * put connection into cache.
+     * 
+     * @param key   key of connection.
+     * @param protocol   the protocol to use.
+     */
+    public static void putNewConnection(String key, Protocol protocol) {
+        hostPortToConnection.putIfAbsent(key,new MariaDbConnection(protocol));
+    }
+    
     /**
      * Creates a new connection with a given protocol and query factory.
      *
@@ -152,13 +163,13 @@ public class MariaDbConnection implements Connection {
             return Pools.retrievePool(urlParser).getConnection();
         }
         String key = 
-                urlParser.getHostAddresses().get(0).host + urlParser.getHostAddresses().get(0).port + urlParser.getUsername();
+                urlParser.getHostAddresses().get(0).host + "_" 
+                + urlParser.getHostAddresses().get(0).port + "_" + urlParser.getUsername();
         if (hostPortToConnection.containsKey(key)) {
             return hostPortToConnection.get(key);
         }
         Protocol protocol = Utils.retrieveProxy(urlParser, globalInfo);
-        hostPortToConnection.put(key,new MariaDbConnection(protocol));
-//        return new MariaDbConnection(protocol);
+        hostPortToConnection.putIfAbsent(key,new MariaDbConnection(protocol));
         return hostPortToConnection.get(key);
     }
 
@@ -255,7 +266,6 @@ public class MariaDbConnection implements Connection {
         if (protocol.isClosed() && protocol.getProxy() != null) {
             lock.lock();
             try {
-                System.out.println("in reconnect");
                 protocol.getProxy().reconnect();
             } finally {
                 lock.unlock();
