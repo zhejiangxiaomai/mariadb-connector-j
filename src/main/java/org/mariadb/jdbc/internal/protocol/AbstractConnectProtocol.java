@@ -126,16 +126,16 @@ public abstract class AbstractConnectProtocol implements Protocol {
     private final String username;
     private final String password;
     public boolean hasWarnings = false;
+    public boolean isRedirection = false;
+    public boolean isRedirectExpried = false;
     public Results activeStreamingResult = null;
     public short serverStatus;
     protected int autoIncrementIncrement;
     protected Socket socket;
     protected Socket socketToServer;   // redirection socket to mariaDb
     protected PacketOutputStream writer;
-    protected PacketOutputStream writerToServer;  //redirection writer to mariaDb
     protected boolean readOnly = false;
-    protected PacketInputStream reader;
-    protected PacketInputStream readerToServer;  //redirection reader to mariaDb
+    protected PacketInputStream reader; 
     private HostAddress currentHost;
     protected HostAddress mariadbHost;  // redirection host  
     protected FailoverProxy proxy;
@@ -434,10 +434,20 @@ public abstract class AbstractConnectProtocol implements Protocol {
      */
     public void connect() throws SQLException {
         if (!isClosed()) close();
-
+        if (mariadbHost != null && isRedirectExpried == false) {
+            System.out.println("re connect !!!");
+            try {
+                connect((mariadbHost != null) ? mariadbHost.host : null,
+                        (mariadbHost != null) ? mariadbHost.port : 3306);
+                return;
+            } catch (IOException ioException) {
+                // do nothing use former redirection host failure
+            }
+        }
         try {
+            //if reconnect, first use redirection host 
             connect((currentHost != null) ? currentHost.host : null,
-                    (currentHost != null) ? currentHost.port : 3306);
+                        (currentHost != null) ? currentHost.port : 3306);
         } catch (IOException ioException) {
             throw ExceptionMapper.connException(
                     "Could not connect to " + currentHost + ". " + ioException.getMessage() + getTraces(),
@@ -457,7 +467,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
         try {
             socket = Utils.createSocket(urlParser, host);
             if (options.socketTimeout != null) socket.setSoTimeout(options.socketTimeout);
-
+            System.out.println("options.socketTimeout : " + options.socketTimeout);
             initializeSocketOption();
 
             // Bind the socket to a particular interface if the connection property
@@ -475,10 +485,15 @@ public abstract class AbstractConnectProtocol implements Protocol {
                     socket.connect(sockAddr);
                 }
             }
-            
-            handleConnectionPhases(host);
-            // redirection
-            if (options.useSsl && mariadbHost != null && mariadbHost.host != currentHost.host && mariadbHost.port != currentHost.port) {
+            ArrayList<Object> objList = handleConnectionPhases(host,socket, reader, writer);
+            socket = (Socket)objList.get(0);
+            reader = (PacketInputStream)objList.get(1);
+            writer = (PacketOutputStream)objList.get(2);
+            // if not in redirection stage
+            if (options.useSsl && !options.disableRedirection && mariadbHost != null
+                && mariadbHost.host != currentHost.host && mariadbHost.port != currentHost.port
+                && isRedirection == false) {
+                isRedirection = true;
                 socketToServer =  SocketFactory.getDefault().createSocket();
                 if (options.socketTimeout != null) socketToServer.setSoTimeout(options.socketTimeout);
                 initializeServerSocketOption();
@@ -491,19 +506,26 @@ public abstract class AbstractConnectProtocol implements Protocol {
                             socketToServer.connect(sockAddr);
                         }
                     }
-                    // if success
-                    redirectHandleConnectionPhases(mariadbHost.host);
+                    ArrayList<Object> objListRedirect = handleConnectionPhases(mariadbHost.host,socketToServer, reader, writer);
                     closeSocket(reader, writer, socket);
-                    reader = readerToServer;
-                    writer = writerToServer;
-                    socket = socketToServer;
-                    String key = 
-                            urlParser.getHostAddresses().get(0).host + "_" 
-                            + urlParser.getHostAddresses().get(0).port + "_" + urlParser.getUsername();
+                    socket = (Socket)objListRedirect.get(0);
+                    reader = (PacketInputStream)objListRedirect.get(1);
+                    writer = (PacketOutputStream)objListRedirect.get(2);
+                    isRedirectExpried = false;
+                    String key = urlParser.getUsername();
+                    for (int i = 0; i < urlParser.getHostAddresses().size(); ++i ) {
+                        key = key + "_" + urlParser.getHostAddresses().get(i).host 
+                            + "_" + urlParser.getHostAddresses().get(i).port;
+                    }
                     MariaDbConnection.putNewConnection(key, this);
                 } catch (SQLException e) {
                     // close redirection connection and socket
-                    closeSocket(readerToServer, writerToServer, socketToServer);
+                    closeSocket(reader, writer, socketToServer);
+                    socket = (Socket)objList.get(0);
+                    reader = (PacketInputStream)objList.get(1);
+                    writer = (PacketOutputStream)objList.get(2);
+                    isRedirection = false;
+                    isRedirectExpried = true;
                 }
             }
             connected = true;
@@ -535,7 +557,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         additionalData(serverData);
                     }
                 } else additionalData(serverData);
-
                 writer.setMaxAllowedPacket(Integer.parseInt(serverData.get("max_allowed_packet")));
                 autoIncrementIncrement = Integer.parseInt(serverData.get("auto_increment_increment"));
                 loadCalendar(serverData.get("time_zone"), serverData.get("system_time_zone"));
@@ -612,9 +633,9 @@ public abstract class AbstractConnectProtocol implements Protocol {
 
         results.commandEnd();
         ResultSet resultSet = results.getResultSet();
+        
         if (resultSet != null) {
             resultSet.next();
-
             serverData.put("max_allowed_packet", resultSet.getString(1));
             serverData.put("system_time_zone", resultSet.getString(2));
             serverData.put("time_zone", resultSet.getString(3));
@@ -756,107 +777,10 @@ public abstract class AbstractConnectProtocol implements Protocol {
         return !this.connected;
     }
     
-    /**
-     * Handle Connection in redirection stage.
-     * 
-     * @param host   redirection host.
-     * @throws SQLException    exception.
-     */
-    private void redirectHandleConnectionPhases(String host) throws SQLException {
+    private ArrayList<Object> handleConnectionPhases(String host, Socket socket, 
+        PacketInputStream reader, PacketOutputStream writer) throws SQLException {
         try {
-            readerToServer = new StandardPacketInputStream(socketToServer.getInputStream(), options.maxQuerySizeToLog);
-            writerToServer = new StandardPacketOutputStream(socketToServer.getOutputStream(), options.maxQuerySizeToLog);
-
-            if (options.enablePacketDebug) {
-                writerToServer.setTraceCache(traceCache);
-                readerToServer.setTraceCache(traceCache);
-            }
-
-            final ReadInitialHandShakePacket greetingPacket = new ReadInitialHandShakePacket(readerToServer);
-            this.serverThreadId = greetingPacket.getServerThreadId();
-            readerToServer.setServerThreadId(this.serverThreadId, null);
-            writerToServer.setServerThreadId(this.serverThreadId, null);
-            this.serverVersion = greetingPacket.getServerVersion();
-            this.serverMariaDb = greetingPacket.isServerMariaDb();
-            this.serverCapabilities = greetingPacket.getServerCapabilities();
-
-            byte exchangeCharset = decideLanguage(greetingPacket.getServerLanguage() & 0xFF);
-            parseVersion();
-            long clientCapabilities = initializeClientCapabilities(serverCapabilities);
-            byte packetSeq = 1;
-            if (options.useSsl && (greetingPacket.getServerCapabilities() & MariaDbServerCapabilities.SSL) != 0) {
-                clientCapabilities |= MariaDbServerCapabilities.SSL;
-                SendSslConnectionRequestPacket amcap = new SendSslConnectionRequestPacket(clientCapabilities, exchangeCharset);
-                amcap.send(writerToServer);
-
-                SSLSocketFactory sslSocketFactory = getSslSocketFactory();
-                SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(socketToServer,
-                    socketToServer.getInetAddress().getHostAddress(), socketToServer.getPort(), true);
-
-                enabledSslProtocolSuites(sslSocket);
-                enabledSslCipherSuites(sslSocket);
-
-                sslSocket.setUseClientMode(true);
-                sslSocket.startHandshake();
-
-
-                // perform hostname verification
-                // (rfc2818 indicate that if "client has external information as to the expected identity of the server,
-                // the hostname check MAY be omitted")
-                if (!options.disableSslHostnameVerification && !options.trustServerCertificate) {
-                    HostnameVerifierImpl hostnameVerifier = new HostnameVerifierImpl();
-                    SSLSession session = sslSocket.getSession();
-                    if (!hostnameVerifier.verify(host, session, serverThreadId)) {
-
-                        //Use proprietary verify method in order to have an exception with a better description of error.
-                        try {
-                            Certificate[] certs = session.getPeerCertificates();
-                            X509Certificate cert = (X509Certificate) certs[0];
-                            hostnameVerifier.verify(host, cert, serverThreadId);
-                        } catch (SSLException ex) {
-                            throw new SQLNonTransientConnectionException("SSL hostname verification failed : " + ex.getMessage()
-                                    + "\nThis verification can be disabled using the option \"disableSslHostnameVerification\" "
-                                    + "but won't prevent man-in-the-middle attacks anymore", "08006");
-                        }
-                    }
-                }
-
-                socketToServer = sslSocket;
-                writerToServer = new StandardPacketOutputStream(socketToServer.getOutputStream(), options.maxQuerySizeToLog);
-                readerToServer = new StandardPacketInputStream(socketToServer.getInputStream(), options.maxQuerySizeToLog);
-
-                if (options.enablePacketDebug) {
-                    writerToServer.setTraceCache(traceCache);
-                    readerToServer.setTraceCache(traceCache);
-                }
-                packetSeq++;
-            } else if (options.useSsl) {
-                throw new SQLException("Trying to connect with ssl, but ssl not enabled in the server");
-            }
-
-            redirectAuthentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket);
-
-        } catch (IOException ioException) {
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (IOException ee) {
-                    //eat exception
-                }
-            }
-            if (currentHost == null) {
-                throw ExceptionMapper.connException(
-                        "Could not connect to socket : " + ioException.getMessage(),
-                        ioException);
-            }
-            throw ExceptionMapper.connException(
-                    "Could not connect to " + currentHost.host + ":" + currentHost.port + " : " + ioException.getMessage(),
-                    ioException);
-        }
-    }
-    
-    private void handleConnectionPhases(String host) throws SQLException {
-        try {
+            final ArrayList<Object> objList = new ArrayList<Object>();
             reader = new StandardPacketInputStream(socket.getInputStream(), options.maxQuerySizeToLog);
             writer = new StandardPacketOutputStream(socket.getOutputStream(), options.maxQuerySizeToLog);
 
@@ -928,9 +852,19 @@ public abstract class AbstractConnectProtocol implements Protocol {
             } else if (options.useSsl) {
                 throw new SQLException("Trying to connect with ssl, but ssl not enabled in the server");
             }
-
-            authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket);
-
+            if (isRedirection == false) {
+                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer, reader, username, currentHost);
+                objList.add(socket);
+                objList.add(reader);
+                objList.add(writer);
+                return objList;
+            } else {
+                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer, reader, reUser, mariadbHost);             
+                objList.add(socket);
+                objList.add(reader);
+                objList.add(writer);
+                return objList;
+            }
         } catch (IOException ioException) {
             if (reader != null) {
                 try {
@@ -944,91 +878,28 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         "Could not connect to socket : " + ioException.getMessage(),
                         ioException);
             }
+            if (isRedirection == true && mariadbHost != null) {
+                // can not connect to redirection host, use old host
+                isRedirection = false;
+                isRedirectExpried = true;
+                throw ExceptionMapper.connException(
+                        "Could not connect to " + mariadbHost.host + ":" + mariadbHost.port + " : " + ioException.getMessage(),
+                        ioException);
+            }
             throw ExceptionMapper.connException(
                     "Could not connect to " + currentHost.host + ":" + currentHost.port + " : " + ioException.getMessage(),
                     ioException);
         }
     }
-
-    /**
-     * redirection authentication with mariadb host.
-     * @param exchangeCharset  charset.
-     * @param clientCapabilities  client info.
-     * @param packetSeq   packetSeq
-     * @param greetingPacket greetingPacket
-     * @throws SQLException SQLException
-     * @throws IOException  IOException
-     */
-    private void redirectAuthentication(byte exchangeCharset, long clientCapabilities, byte packetSeq, ReadInitialHandShakePacket greetingPacket)
-            throws SQLException, IOException {
-        //send handshake response
-        SendHandshakeResponsePacket.send(writerToServer, this.reUser,
-                this.password,
-                this.mariadbHost,
-                database,
-                clientCapabilities,
-                serverCapabilities,
-                exchangeCharset,
-                packetSeq,
-                options,
-                greetingPacket);
-        Buffer buffer = readerToServer.getPacket(false);
-
-        if ((buffer.getByteAt(0) & 0xFF) == 0xFE) {
-            writerToServer.permitTrace(false);
-            InterfaceAuthSwitchSendResponsePacket interfaceSendPacket;
-            if ((serverCapabilities & MariaDbServerCapabilities.PLUGIN_AUTH) != 0) {
-                buffer.readByte();
-                byte[] authData;
-                String plugin;
-                if (buffer.remaining() > 0) {
-                    //AuthSwitchRequest packet.
-                    plugin = buffer.readStringNullEnd(Charset.forName("ASCII"));
-                    authData = buffer.readRawBytes(buffer.remaining());
-                } else {
-                    //OldAuthSwitchRequest
-                    plugin = DefaultAuthenticationProvider.MYSQL_OLD_PASSWORD;
-                    authData = Utils.copyWithLength(greetingPacket.getSeed(), 8);
-                }
-
-                //Authentication according to plugin.
-                //see AuthenticationProviderHolder for implement other plugin
-                interfaceSendPacket = AuthenticationProviderHolder.getAuthenticationProvider()
-                        .processAuthPlugin(readerToServer, plugin, password, authData, readerToServer.getLastPacketSeq() + 1,
-                                options.passwordCharacterEncoding);
-            } else {
-                interfaceSendPacket = new SendOldPasswordAuthPacket(this.password, Utils.copyWithLength(greetingPacket.getSeed(), 8),
-                        readerToServer.getLastPacketSeq() + 1, options.passwordCharacterEncoding);
-            }
-            interfaceSendPacket.send(writerToServer);
-            interfaceSendPacket.handleResultPacket(readerToServer);
-        } else {
-            if (buffer.getByteAt(0) == ERROR) {
-                ErrorPacket errorPacket = new ErrorPacket(buffer);
-                if (password != null && !password.isEmpty() && errorPacket.getErrorNumber() == 1045 && "28000".equals(errorPacket.getSqlState())) {
-                    //Access denied
-                    throw new SQLException(errorPacket.getMessage()
-                            + "\nCurrent charset is " + Charset.defaultCharset().displayName()
-                            + ". If password has been set using other charset, consider "
-                            + "using option 'passwordCharacterEncoding'",
-                            errorPacket.getSqlState(), errorPacket.getErrorNumber());
-                }
-                throw new SQLException(errorPacket.getMessage(), errorPacket.getSqlState(), errorPacket.getErrorNumber());
-            }
-            OkPacket okMsg = new OkPacket(buffer);
-            serverStatus = okMsg.getServerStatus();
-        }
-        writerToServer.permitTrace(true);
-    }
     
     @SuppressWarnings("unused")
-    private void authentication(byte exchangeCharset, long clientCapabilities, byte packetSeq, ReadInitialHandShakePacket greetingPacket)
+    private void authentication(byte exchangeCharset, long clientCapabilities, byte packetSeq, ReadInitialHandShakePacket greetingPacket, 
+            PacketOutputStream writer, PacketInputStream reader, String user, HostAddress host)
             throws SQLException, IOException {
-
         //send handshake response
-        SendHandshakeResponsePacket.send(writer, this.username,
+        SendHandshakeResponsePacket.send(writer, user,
                 this.password,
-                this.currentHost,
+                host,
                 database,
                 clientCapabilities,
                 serverCapabilities,
@@ -1064,13 +935,14 @@ public abstract class AbstractConnectProtocol implements Protocol {
             }
             OkPacket msg = new OkPacket();
             interfaceSendPacket.send(writer);
-//            interfaceSendPacket.handleResultPacket(reader);
-            interfaceSendPacket.handleResultPacket(reader, msg);
-            if (msg != null) {
+            if (isRedirection == false) {
+                interfaceSendPacket.handleResultPacket(reader, msg);
                 if (msg.getHost() != "") {
                     mariadbHost = new HostAddress(msg.getHost(),msg.getPort());
                     reUser = msg.getUser();
                 }
+            } else {
+                interfaceSendPacket.handleResultPacket(reader);
             }
         } else {
             if (buffer.getByteAt(0) == ERROR) {

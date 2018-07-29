@@ -162,9 +162,13 @@ public class MariaDbConnection implements Connection {
         if (urlParser.getOptions().pool) {
             return Pools.retrievePool(urlParser).getConnection();
         }
-        String key = 
-                urlParser.getHostAddresses().get(0).host + "_" 
-                + urlParser.getHostAddresses().get(0).port + "_" + urlParser.getUsername();
+        
+        String key = urlParser.getUsername();
+        for (int i = 0; i < urlParser.getHostAddresses().size(); ++i ) {
+            key = key + "_" + urlParser.getHostAddresses().get(i).host 
+                + "_" + urlParser.getHostAddresses().get(i).port;
+        } 
+        
         if (hostPortToConnection.containsKey(key)) {
             return hostPortToConnection.get(key);
         }

@@ -450,7 +450,13 @@ public enum DefaultOptions {
      * This option permit to deactivate this validation.
      */
     SSL_HOSTNAME_VERIFICATION("disableSslHostnameVerification", Boolean.FALSE, "2.1.0"),
-
+    
+    /**
+     *  Enable redirection.
+     *  This option let user to decide if use redirection feature.
+     */
+    USE_REDIRECTION("disableRedirection",Boolean.TRUE,"2.1.0"),
+    
     /**
      * Use dedicated COM_STMT_BULK_EXECUTE protocol for batch insert when possible.
      * (batch without Statement.RETURN_GENERATED_KEYS and streams) to have faster batch.
