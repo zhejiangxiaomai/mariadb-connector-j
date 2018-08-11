@@ -118,7 +118,6 @@ public abstract class AbstractAuthSwitchSendResponsePacket implements InterfaceA
             msg.setHost(tmp.getHost());
             msg.setPort(tmp.getPort());
             msg.setUser(tmp.getUser());
-            msg.setTtl(tmp.getTtl());
         }  
     }
 }

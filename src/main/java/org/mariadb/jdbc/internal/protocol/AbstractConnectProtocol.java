@@ -87,6 +87,7 @@ import org.mariadb.jdbc.internal.util.constant.ServerStatus;
 import org.mariadb.jdbc.internal.util.exceptions.ExceptionMapper;
 import org.mariadb.jdbc.internal.util.pool.GlobalStateInfo;
 
+import javafx.util.Pair;
 import javax.net.SocketFactory;
 import javax.net.ssl.*;
 import java.io.FileInputStream;
@@ -127,7 +128,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
     private final String password;
     public boolean hasWarnings = false;
     public boolean isRedirection = false;
-    public boolean isRedirectExpried = false;
     public Results activeStreamingResult = null;
     public short serverStatus;
     protected int autoIncrementIncrement;
@@ -434,14 +434,18 @@ public abstract class AbstractConnectProtocol implements Protocol {
      */
     public void connect() throws SQLException {
         if (!isClosed()) close();
-        if (mariadbHost != null && isRedirectExpried == false) {
-            System.out.println("re connect !!!");
+        String key = username + "_" + currentHost.host + "_" + currentHost.port;
+        Pair<HostAddress, String> pair = MariaDbConnection.getRediectHost(key);
+        if (pair != null) {
+            mariadbHost = pair.getKey();
+            reUser = pair.getValue();
             try {
-                connect((mariadbHost != null) ? mariadbHost.host : null,
-                        (mariadbHost != null) ? mariadbHost.port : 3306);
+                isRedirection = true;
+                connect(mariadbHost.host ,mariadbHost.port);
                 return;
-            } catch (IOException ioException) {
-                // do nothing use former redirection host failure
+            } catch (IOException | SQLException e) {
+                MariaDbConnection.removeRediectHost(key);
+                mariadbHost = null;
             }
         }
         try {
@@ -467,7 +471,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
         try {
             socket = Utils.createSocket(urlParser, host);
             if (options.socketTimeout != null) socket.setSoTimeout(options.socketTimeout);
-            System.out.println("options.socketTimeout : " + options.socketTimeout);
             initializeSocketOption();
 
             // Bind the socket to a particular interface if the connection property
@@ -489,7 +492,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
             socket = (Socket)objList.get(0);
             reader = (PacketInputStream)objList.get(1);
             writer = (PacketOutputStream)objList.get(2);
-            // if not in redirection stage
             if (options.useSsl && !options.disableRedirection && mariadbHost != null
                 && mariadbHost.host != currentHost.host && mariadbHost.port != currentHost.port
                 && isRedirection == false) {
@@ -507,25 +509,30 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         }
                     }
                     ArrayList<Object> objListRedirect = handleConnectionPhases(mariadbHost.host,socketToServer, reader, writer);
-                    closeSocket(reader, writer, socket);
+                    if (socket != null) {
+                        try {
+                            socket.close();
+                        } catch (IOException ioe) {
+                            //eat exception
+                        }
+                    }
                     socket = (Socket)objListRedirect.get(0);
                     reader = (PacketInputStream)objListRedirect.get(1);
                     writer = (PacketOutputStream)objListRedirect.get(2);
-                    isRedirectExpried = false;
-                    String key = urlParser.getUsername();
-                    for (int i = 0; i < urlParser.getHostAddresses().size(); ++i ) {
-                        key = key + "_" + urlParser.getHostAddresses().get(i).host 
-                            + "_" + urlParser.getHostAddresses().get(i).port;
-                    }
-                    MariaDbConnection.putNewConnection(key, this);
-                } catch (SQLException e) {
-                    // close redirection connection and socket
-                    closeSocket(reader, writer, socketToServer);
+                    String key = urlParser.getUsername() + "_" + currentHost.host + "_" + currentHost.port;
+                    MariaDbConnection.putNewRediectHost(key, mariadbHost, reUser);
+                } catch (IOException | SQLException e) {
                     socket = (Socket)objList.get(0);
                     reader = (PacketInputStream)objList.get(1);
                     writer = (PacketOutputStream)objList.get(2);
                     isRedirection = false;
-                    isRedirectExpried = true;
+                    if (socketToServer != null) {
+                        try {
+                            socketToServer.close();
+                        } catch (IOException ioe) {
+                            // eat exception
+                        }
+                    }
                 }
             }
             connected = true;
@@ -870,7 +877,9 @@ public abstract class AbstractConnectProtocol implements Protocol {
                 try {
                     reader.close();
                 } catch (IOException ee) {
-                    //eat exception
+                    throw ExceptionMapper.connException(
+                            ioException.getMessage(),
+                            ioException);
                 }
             }
             if (currentHost == null) {
@@ -881,7 +890,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
             if (isRedirection == true && mariadbHost != null) {
                 // can not connect to redirection host, use old host
                 isRedirection = false;
-                isRedirectExpried = true;
                 throw ExceptionMapper.connException(
                         "Could not connect to " + mariadbHost.host + ":" + mariadbHost.port + " : " + ioException.getMessage(),
                         ioException);
@@ -958,7 +966,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
                 throw new SQLException(errorPacket.getMessage(), errorPacket.getSqlState(), errorPacket.getErrorNumber());
             }
             OkPacket okMsg = new OkPacket(buffer);
-//            serverStatus = new OkPacket(buffer).getServerStatus();
             serverStatus = okMsg.getServerStatus();
         }
 

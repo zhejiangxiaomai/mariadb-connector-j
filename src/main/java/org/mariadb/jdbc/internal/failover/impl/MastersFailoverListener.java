@@ -150,7 +150,6 @@ public class MastersFailoverListener extends AbstractMastersListener {
     public HandleErrorResult primaryFail(Method method, Object[] args, boolean killCmd) throws Throwable {
         boolean alreadyClosed = !currentProtocol.isConnected();
         boolean inTransaction = currentProtocol != null && currentProtocol.inTransaction();
-
         if (currentProtocol.isConnected()) currentProtocol.close();
 
         try {
@@ -220,7 +219,6 @@ public class MastersFailoverListener extends AbstractMastersListener {
                 loopAddress.remove(currentProtocol.getHostAddress());
                 //loopAddress.add(currentProtocol.getHostAddress());
             }
-
             MasterProtocol.loop(this, globalInfo, loopAddress, searchFilter);
             //close loop if all connection are retrieved
             if (!isMasterHostFail()) {
@@ -292,7 +290,6 @@ public class MastersFailoverListener extends AbstractMastersListener {
      * @throws SQLException if reconnect a new connection but there was an active transaction.
      */
     public void reconnect() throws SQLException {
-        System.out.println("reconnect()");
         boolean inTransaction = currentProtocol != null && currentProtocol.inTransaction();
         reconnectFailedConnection(new SearchFilter(true, false));
         handleFailLoop();

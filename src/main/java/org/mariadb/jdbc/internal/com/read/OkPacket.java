@@ -64,7 +64,6 @@ public class OkPacket {
     private String host;
     private int port;
     private String user;
-    private int ttl;
     /**
      * Read Ok stream result.
      *
@@ -79,8 +78,9 @@ public class OkPacket {
         String serverInfo = "";
         if (buffer.remaining() >= 0) {
             serverInfo = buffer.readStringLengthEncoded(Charset.forName("ASCII"));
+            parseServerInfo(serverInfo);
         }
-        parseServerInfo(serverInfo);
+        
     }
 
     /**
@@ -95,7 +95,6 @@ public class OkPacket {
         host = "";
         port = -1;
         user = "";
-        ttl = -2;
     }
     
     @Override
@@ -113,9 +112,7 @@ public class OkPacket {
                 + "&port="
                 + port
                 + "&user="
-                + user
-                + "&ttl="
-                + ttl;
+                + user;
     }
 
     public long getAffectedRows() {
@@ -138,26 +135,29 @@ public class OkPacket {
      * @param str   message about server information
      */
     public void parseServerInfo(String str) {
-        if (str.length() >= 18) {
-            // host
-            str = str.substring(18);
-            int beginIdx = 0;
-            int endIdx = str.indexOf(':');
-            host = str.substring(beginIdx, endIdx);
-            //port
-            beginIdx = endIdx + 1;
-            endIdx = str.indexOf('/');
-            port = Integer.parseInt(str.substring(beginIdx, endIdx));
-
-            beginIdx = str.indexOf('=') + 1;
-            user = str.substring(beginIdx); //, end_idx
-            ttl = -2;
-        } else {
-            // if no cloud server info, then inital it 
+        try {
+            if (str.length() >= 18) {
+                // host
+                str = str.substring(18);
+                int beginIdx = 0;
+                int endIdx = str.indexOf(':');
+                host = str.substring(beginIdx, endIdx);
+                //port
+                beginIdx = endIdx + 1;
+                endIdx = str.indexOf('/');
+                port = Integer.parseInt(str.substring(beginIdx, endIdx));
+                beginIdx = str.indexOf('=') + 1;
+                user = str.substring(beginIdx); //, end_idx
+            } else {
+                // if no cloud server info, then inital it 
+                host = "";
+                port = -1;
+                user = "";
+            }
+        } catch (Exception e) {
             host = "";
             port = -1;
             user = "";
-            ttl = -2;
         }
     }
     
@@ -172,10 +172,6 @@ public class OkPacket {
     public String getUser() {
         return user;
     }
-    
-    public int getTtl() {
-        return ttl;
-    }
 
     public void setHost(String host) {
         this.host = host;
@@ -187,9 +183,5 @@ public class OkPacket {
 
     public void setUser(String user) {
         this.user = user;
-    }
-
-    public void setTtl(int ttl) {
-        this.ttl = ttl;
     }
 }

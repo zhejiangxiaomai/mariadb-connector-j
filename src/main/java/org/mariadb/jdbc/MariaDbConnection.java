@@ -65,6 +65,8 @@ import org.mariadb.jdbc.internal.util.exceptions.ExceptionMapper;
 import org.mariadb.jdbc.internal.util.pool.GlobalStateInfo;
 import org.mariadb.jdbc.internal.util.pool.Pools;
 
+import javafx.util.Pair;
+
 import java.net.SocketException;
 import java.sql.*;
 import java.util.HashMap;
@@ -113,6 +115,7 @@ public class MariaDbConnection implements Connection {
     private int stateFlag = 0;
     private int defaultTransactionIsolation = 0;
     private static ConcurrentHashMap<String,MariaDbConnection> hostPortToConnection = new ConcurrentHashMap<String,MariaDbConnection>();
+    private static ConcurrentHashMap<String,Pair<HostAddress,String>> redirectCache = new ConcurrentHashMap<String,Pair<HostAddress,String>>();
     /**
      * save point count - to generate good names for the savepoints.
      */
@@ -124,15 +127,35 @@ public class MariaDbConnection implements Connection {
     private boolean warningsCleared;
 
     /**
-     * put connection into cache.
-     * 
-     * @param key   key of connection.
-     * @param protocol   the protocol to use.
-     */
-    public static void putNewConnection(String key, Protocol protocol) {
-        hostPortToConnection.putIfAbsent(key,new MariaDbConnection(protocol));
+    * put connection into cache.
+    * 
+    * @param key   key of redirection host.
+    * @param redirectHost  redirection host to redirect.
+    * @param reUser  redirection username to redirect.
+    */
+    public static void putNewRediectHost(String key, HostAddress redirectHost, String reUser) {
+        redirectCache.putIfAbsent(key,new Pair<>(redirectHost, reUser));
     }
     
+    /**
+     * get connection from cache.
+     * 
+     * @param key   key of connection.
+     * @return connection object and reUser
+     */
+    public static Pair<HostAddress,String> getRediectHost(String key) {
+        return redirectCache.get(key);
+    }
+    
+    /**
+     * remove RediectHost
+     * 
+     * @param key   key of connection.
+     */
+    public static void removeRediectHost(String key) {
+        redirectCache.remove(key);
+    }
+        
     /**
      * Creates a new connection with a given protocol and query factory.
      *
@@ -162,19 +185,8 @@ public class MariaDbConnection implements Connection {
         if (urlParser.getOptions().pool) {
             return Pools.retrievePool(urlParser).getConnection();
         }
-        
-        String key = urlParser.getUsername();
-        for (int i = 0; i < urlParser.getHostAddresses().size(); ++i ) {
-            key = key + "_" + urlParser.getHostAddresses().get(i).host 
-                + "_" + urlParser.getHostAddresses().get(i).port;
-        } 
-        
-        if (hostPortToConnection.containsKey(key)) {
-            return hostPortToConnection.get(key);
-        }
         Protocol protocol = Utils.retrieveProxy(urlParser, globalInfo);
-        hostPortToConnection.putIfAbsent(key,new MariaDbConnection(protocol));
-        return hostPortToConnection.get(key);
+        return  new MariaDbConnection(protocol);
     }
 
     public static String quoteIdentifier(String string) {
@@ -199,7 +211,7 @@ public class MariaDbConnection implements Connection {
     protected Protocol getProtocol() {
         return protocol;
     }
-
+    
     /**
      * creates a new statement.
      *
@@ -267,7 +279,7 @@ public class MariaDbConnection implements Connection {
         if (protocol.isExplicitClosed()) {
             throw new SQLException("createStatement() is called on closed connection");
         }
-        if (protocol.isClosed() && protocol.getProxy() != null) {
+        if ( protocol.isClosed() && protocol.getProxy() != null) {
             lock.lock();
             try {
                 protocol.getProxy().reconnect();
