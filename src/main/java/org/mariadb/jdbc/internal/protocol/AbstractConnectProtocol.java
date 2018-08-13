@@ -137,7 +137,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
     protected boolean readOnly = false;
     protected PacketInputStream reader; 
     private HostAddress currentHost;
-    protected HostAddress mariadbHost;  // redirection host  
+    protected HostAddress redirectAddressInfo;  // redirection host  
     protected FailoverProxy proxy;
     protected volatile boolean connected = false;
     protected boolean explicitClosed = false;
@@ -437,19 +437,23 @@ public abstract class AbstractConnectProtocol implements Protocol {
         String key = username + "_" + currentHost.host + "_" + currentHost.port;
         Pair<HostAddress, String> pair = MariaDbConnection.getRediectHost(key);
         if (pair != null) {
-            mariadbHost = pair.getKey();
+            redirectAddressInfo = pair.getKey();
             reUser = pair.getValue();
             try {
                 isRedirection = true;
-                connect(mariadbHost.host ,mariadbHost.port);
+                System.out.println("connect to mariadb use redirection host :" + redirectAddressInfo.host + " port :" + redirectAddressInfo.port);
+                connect(redirectAddressInfo.host ,redirectAddressInfo.port);
                 return;
             } catch (IOException | SQLException e) {
                 MariaDbConnection.removeRediectHost(key);
-                mariadbHost = null;
+                System.out.println("remove redirection host  :" + redirectAddressInfo.host + " port :"
+                        + redirectAddressInfo.port + " because the info is invalid");
+                redirectAddressInfo = null;
             }
         }
         try {
             //if reconnect, first use redirection host 
+            System.out.println("normal connect");
             connect((currentHost != null) ? currentHost.host : null,
                         (currentHost != null) ? currentHost.port : 3306);
         } catch (IOException ioException) {
@@ -492,23 +496,24 @@ public abstract class AbstractConnectProtocol implements Protocol {
             socket = (Socket)objList.get(0);
             reader = (PacketInputStream)objList.get(1);
             writer = (PacketOutputStream)objList.get(2);
-            if (options.useSsl && !options.disableRedirection && mariadbHost != null
-                && mariadbHost.host != currentHost.host && mariadbHost.port != currentHost.port
+            if (options.useSsl && options.redirection && redirectAddressInfo != null
+                && redirectAddressInfo.host != currentHost.host && redirectAddressInfo.port != currentHost.port
                 && isRedirection == false) {
+                System.out.println("in Redirection stage");
                 isRedirection = true;
                 socketToServer =  SocketFactory.getDefault().createSocket();
                 if (options.socketTimeout != null) socketToServer.setSoTimeout(options.socketTimeout);
                 initializeServerSocketOption();
                 try {
                     if (!socketToServer.isConnected() ) {
-                        InetSocketAddress sockAddr = new InetSocketAddress(mariadbHost.host, mariadbHost.port);
+                        InetSocketAddress sockAddr = new InetSocketAddress(redirectAddressInfo.host, redirectAddressInfo.port);
                         if (options.connectTimeout != 0) {
                             socketToServer.connect(sockAddr, options.connectTimeout);
                         } else {
                             socketToServer.connect(sockAddr);
                         }
                     }
-                    ArrayList<Object> objListRedirect = handleConnectionPhases(mariadbHost.host,socketToServer, reader, writer);
+                    ArrayList<Object> objListRedirect = handleConnectionPhases(redirectAddressInfo.host,socketToServer, reader, writer);
                     if (socket != null) {
                         try {
                             socket.close();
@@ -520,8 +525,11 @@ public abstract class AbstractConnectProtocol implements Protocol {
                     reader = (PacketInputStream)objListRedirect.get(1);
                     writer = (PacketOutputStream)objListRedirect.get(2);
                     String key = urlParser.getUsername() + "_" + currentHost.host + "_" + currentHost.port;
-                    MariaDbConnection.putNewRediectHost(key, mariadbHost, reUser);
+                    MariaDbConnection.putNewRediectHost(key, redirectAddressInfo, reUser);
+                    System.out.println("Redirection Success, put host " + redirectAddressInfo.host 
+                            + " port : " + redirectAddressInfo.port + "into map.");
                 } catch (IOException | SQLException e) {
+                    System.out.println("Redirection failure");
                     socket = (Socket)objList.get(0);
                     reader = (PacketInputStream)objList.get(1);
                     writer = (PacketOutputStream)objList.get(2);
@@ -866,7 +874,8 @@ public abstract class AbstractConnectProtocol implements Protocol {
                 objList.add(writer);
                 return objList;
             } else {
-                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer, reader, reUser, mariadbHost);             
+                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer,
+                        reader, reUser, redirectAddressInfo);             
                 objList.add(socket);
                 objList.add(reader);
                 objList.add(writer);
@@ -887,11 +896,11 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         "Could not connect to socket : " + ioException.getMessage(),
                         ioException);
             }
-            if (isRedirection == true && mariadbHost != null) {
+            if (isRedirection == true && redirectAddressInfo != null) {
                 // can not connect to redirection host, use old host
                 isRedirection = false;
                 throw ExceptionMapper.connException(
-                        "Could not connect to " + mariadbHost.host + ":" + mariadbHost.port + " : " + ioException.getMessage(),
+                        "Could not connect to " + redirectAddressInfo.host + ":" + redirectAddressInfo.port + " : " + ioException.getMessage(),
                         ioException);
             }
             throw ExceptionMapper.connException(
@@ -946,7 +955,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
             if (isRedirection == false) {
                 interfaceSendPacket.handleResultPacket(reader, msg);
                 if (msg.getHost() != "") {
-                    mariadbHost = new HostAddress(msg.getHost(),msg.getPort());
+                    redirectAddressInfo = new HostAddress(msg.getHost(),msg.getPort());
                     reUser = msg.getUser();
                 }
             } else {

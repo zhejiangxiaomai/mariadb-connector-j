@@ -135,6 +135,7 @@ public class OkPacket {
      * @param str   message about server information
      */
     public void parseServerInfo(String str) {
+        System.out.println("get string " + str);
         try {
             if (str.length() >= 18) {
                 // host

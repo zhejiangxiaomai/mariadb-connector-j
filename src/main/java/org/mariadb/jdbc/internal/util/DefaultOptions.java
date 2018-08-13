@@ -455,7 +455,7 @@ public enum DefaultOptions {
      *  Enable redirection.
      *  This option let user to decide if use redirection feature.
      */
-    USE_REDIRECTION("disableRedirection",Boolean.TRUE,"2.1.0"),
+    USE_REDIRECTION("redirection",Boolean.FALSE,"2.1.0"),
     
     /**
      * Use dedicated COM_STMT_BULK_EXECUTE protocol for batch insert when possible.

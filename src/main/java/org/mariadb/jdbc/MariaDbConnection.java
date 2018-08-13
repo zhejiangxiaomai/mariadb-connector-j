@@ -278,7 +278,7 @@ public class MariaDbConnection implements Connection {
         if (protocol.isExplicitClosed()) {
             throw new SQLException("createStatement() is called on closed connection");
         }
-        if ( protocol.isClosed() && protocol.getProxy() != null) {
+        if (protocol.isClosed() && protocol.getProxy() != null) {
             lock.lock();
             try {
                 protocol.getProxy().reconnect();
