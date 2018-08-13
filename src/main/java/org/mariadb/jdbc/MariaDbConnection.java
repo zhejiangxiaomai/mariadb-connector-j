@@ -114,7 +114,6 @@ public class MariaDbConnection implements Connection {
     private boolean sessionStateAware = true;
     private int stateFlag = 0;
     private int defaultTransactionIsolation = 0;
-    private static ConcurrentHashMap<String,MariaDbConnection> hostPortToConnection = new ConcurrentHashMap<String,MariaDbConnection>();
     private static ConcurrentHashMap<String,Pair<HostAddress,String>> redirectCache = new ConcurrentHashMap<String,Pair<HostAddress,String>>();
     /**
      * save point count - to generate good names for the savepoints.
