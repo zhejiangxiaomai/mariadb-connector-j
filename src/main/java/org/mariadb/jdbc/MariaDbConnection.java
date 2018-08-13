@@ -185,7 +185,7 @@ public class MariaDbConnection implements Connection {
             return Pools.retrievePool(urlParser).getConnection();
         }
         Protocol protocol = Utils.retrieveProxy(urlParser, globalInfo);
-        return  new MariaDbConnection(protocol);
+        return new MariaDbConnection(protocol);
     }
 
     public static String quoteIdentifier(String string) {
