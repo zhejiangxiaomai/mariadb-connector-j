@@ -88,6 +88,7 @@ import org.mariadb.jdbc.internal.util.exceptions.ExceptionMapper;
 import org.mariadb.jdbc.internal.util.pool.GlobalStateInfo;
 
 import javafx.util.Pair;
+
 import javax.net.SocketFactory;
 import javax.net.ssl.*;
 import java.io.FileInputStream;
@@ -115,6 +116,12 @@ import java.util.concurrent.locks.ReentrantLock;
 import static org.mariadb.jdbc.internal.com.Packet.*;
 
 public abstract class AbstractConnectProtocol implements Protocol {
+    enum RedirecStatus {
+        redirect_none,   // not redirect
+        redirecting,    // try to redirect
+        redirected    // redirect successfully
+    }
+
     private static final byte[] SESSION_QUERY = ("SELECT @@max_allowed_packet,"
             + "@@system_time_zone,"
             + "@@time_zone,"
@@ -127,12 +134,12 @@ public abstract class AbstractConnectProtocol implements Protocol {
     private final String username;
     private final String password;
     public boolean hasWarnings = false;
-    public boolean isRedirection = false;
+    public RedirecStatus redirectStatus = RedirecStatus.redirect_none;
     public Results activeStreamingResult = null;
     public short serverStatus;
     protected int autoIncrementIncrement;
     protected Socket socket;
-    protected Socket socketToServer;   // redirection socket to mariaDb
+    protected Socket socketToServer;   // redirection socket to redirection server
     protected PacketOutputStream writer;
     protected boolean readOnly = false;
     protected PacketInputStream reader; 
@@ -378,16 +385,16 @@ public abstract class AbstractConnectProtocol implements Protocol {
             }
         }
 
-    }
-
+    }     
+    
     /**
      * InitializeSocketOption.
+     * @param socket socket
+     * @return initialized socket
      */
-    private void initializeSocketOption() {
+    private Socket initializeSocketOption(Socket socket) {
         try {
-
             socket.setTcpNoDelay(options.tcpNoDelay);
-
             if (options.tcpKeepAlive) {
                 socket.setKeepAlive(true);
             }
@@ -400,33 +407,13 @@ public abstract class AbstractConnectProtocol implements Protocol {
             if (options.tcpAbortiveClose) {
                 socket.setSoLinger(true, 0);
             }
+            return socket;
         } catch (Exception e) {
-            logger.debug("Failed to set socket option", e);
+            logger.debug("Failed to set socketToServer option", e);
+            return socket;
         }
     }
     
-    /**
-     * InitializeServerSocketOption.
-     */
-    private void initializeServerSocketOption() {
-        try {
-            socketToServer.setTcpNoDelay(options.tcpNoDelay);
-            if (options.tcpKeepAlive) {
-                socketToServer.setKeepAlive(true);
-            }
-            if (options.tcpRcvBuf != null) {
-                socketToServer.setReceiveBufferSize(options.tcpRcvBuf);
-            }
-            if (options.tcpSndBuf != null) {
-                socketToServer.setSendBufferSize(options.tcpSndBuf);
-            }
-            if (options.tcpAbortiveClose) {
-                socketToServer.setSoLinger(true, 0);
-            }
-        } catch (Exception e) {
-            logger.debug("Failed to set socketToServer option", e);
-        }
-    }
     /**
      * Connect to currentHost.
      *
@@ -440,7 +427,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
             redirectAddressInfo = pair.getKey();
             reUser = pair.getValue();
             try {
-                isRedirection = true;
+                redirectStatus = RedirecStatus.redirected;
                 System.out.println("connect to mariadb use redirection host :" + redirectAddressInfo.host + " port :" + redirectAddressInfo.port);
                 connect(redirectAddressInfo.host ,redirectAddressInfo.port);
                 return;
@@ -449,6 +436,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
                 System.out.println("remove redirection host  :" + redirectAddressInfo.host + " port :"
                         + redirectAddressInfo.port + " because the info is invalid");
                 redirectAddressInfo = null;
+                redirectStatus = RedirecStatus.redirect_none;
             }
         }
         try {
@@ -475,8 +463,8 @@ public abstract class AbstractConnectProtocol implements Protocol {
         try {
             socket = Utils.createSocket(urlParser, host);
             if (options.socketTimeout != null) socket.setSoTimeout(options.socketTimeout);
-            initializeSocketOption();
-
+            socket = initializeSocketOption(socket);
+//            initializeSocketOption();
             // Bind the socket to a particular interface if the connection property
             // localSocketAddress has been defined.
             if (options.localSocketAddress != null) {
@@ -496,14 +484,13 @@ public abstract class AbstractConnectProtocol implements Protocol {
             socket = (Socket)objList.get(0);
             reader = (PacketInputStream)objList.get(1);
             writer = (PacketOutputStream)objList.get(2);
-            if (options.useSsl && options.redirection && redirectAddressInfo != null
-                && redirectAddressInfo.host != currentHost.host && redirectAddressInfo.port != currentHost.port
-                && isRedirection == false) {
+            if (options.useSsl && options.redirection && redirectAddressInfo != null && ( 
+                redirectAddressInfo.host != currentHost.host || redirectAddressInfo.port != currentHost.port)
+                   && redirectStatus == RedirecStatus.redirecting) {
                 System.out.println("in Redirection stage");
-                isRedirection = true;
                 socketToServer =  SocketFactory.getDefault().createSocket();
                 if (options.socketTimeout != null) socketToServer.setSoTimeout(options.socketTimeout);
-                initializeServerSocketOption();
+                socketToServer = initializeSocketOption(socketToServer);
                 try {
                     if (!socketToServer.isConnected() ) {
                         InetSocketAddress sockAddr = new InetSocketAddress(redirectAddressInfo.host, redirectAddressInfo.port);
@@ -526,14 +513,15 @@ public abstract class AbstractConnectProtocol implements Protocol {
                     writer = (PacketOutputStream)objListRedirect.get(2);
                     String key = urlParser.getUsername() + "_" + currentHost.host + "_" + currentHost.port;
                     MariaDbConnection.putNewRediectHost(key, redirectAddressInfo, reUser);
+                    redirectStatus = RedirecStatus.redirected;
                     System.out.println("Redirection Success, put host " + redirectAddressInfo.host 
                             + " port : " + redirectAddressInfo.port + "into map.");
                 } catch (IOException | SQLException e) {
-                    System.out.println("Redirection failure");
+                    System.out.println("Redirection failure" + e.getMessage());
                     socket = (Socket)objList.get(0);
                     reader = (PacketInputStream)objList.get(1);
                     writer = (PacketOutputStream)objList.get(2);
-                    isRedirection = false;
+                    redirectStatus = RedirecStatus.redirect_none;
                     if (socketToServer != null) {
                         try {
                             socketToServer.close();
@@ -867,15 +855,20 @@ public abstract class AbstractConnectProtocol implements Protocol {
             } else if (options.useSsl) {
                 throw new SQLException("Trying to connect with ssl, but ssl not enabled in the server");
             }
-            if (isRedirection == false) {
-                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer, reader, username, currentHost);
+            
+            if (redirectStatus == RedirecStatus.redirecting || redirectStatus == RedirecStatus.redirected) {
+                System.out.println("user name is " + reUser + " passwd is " + password + "host "
+                        + redirectAddressInfo.host + "port " + redirectAddressInfo.port);
+                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer,
+                        reader, reUser, redirectAddressInfo);             
                 objList.add(socket);
                 objList.add(reader);
                 objList.add(writer);
-                return objList;
+                return objList; 
             } else {
-                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer,
-                        reader, reUser, redirectAddressInfo);             
+                //turn to redirecting status 
+                redirectStatus = RedirecStatus.redirecting;
+                authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer, reader, username, currentHost);
                 objList.add(socket);
                 objList.add(reader);
                 objList.add(writer);
@@ -896,9 +889,10 @@ public abstract class AbstractConnectProtocol implements Protocol {
                         "Could not connect to socket : " + ioException.getMessage(),
                         ioException);
             }
-            if (isRedirection == true && redirectAddressInfo != null) {
+            if ((redirectStatus == RedirecStatus.redirecting || redirectStatus == RedirecStatus.redirected) 
+                    && redirectAddressInfo != null) {
                 // can not connect to redirection host, use old host
-                isRedirection = false;
+                redirectStatus = RedirecStatus.redirect_none;
                 throw ExceptionMapper.connException(
                         "Could not connect to " + redirectAddressInfo.host + ":" + redirectAddressInfo.port + " : " + ioException.getMessage(),
                         ioException);
@@ -952,7 +946,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
             }
             OkPacket msg = new OkPacket();
             interfaceSendPacket.send(writer);
-            if (isRedirection == false) {
+            if (redirectStatus == RedirecStatus.redirecting) {
                 interfaceSendPacket.handleResultPacket(reader, msg);
                 if (msg.getHost() != "") {
                     redirectAddressInfo = new HostAddress(msg.getHost(),msg.getPort());

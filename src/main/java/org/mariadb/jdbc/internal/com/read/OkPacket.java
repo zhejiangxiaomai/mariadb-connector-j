@@ -137,7 +137,7 @@ public class OkPacket {
     public void parseServerInfo(String str) {
         System.out.println("get string " + str);
         try {
-            if (str.length() >= 18) {
+            if (str.indexOf("Location") != -1) {
                 // host
                 str = str.substring(18);
                 int beginIdx = 0;
