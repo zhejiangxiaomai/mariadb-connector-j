@@ -428,20 +428,16 @@ public abstract class AbstractConnectProtocol implements Protocol {
             reUser = pair.getValue();
             try {
                 redirectStatus = RedirecStatus.redirected;
-                System.out.println("connect to mariadb use redirection host :" + redirectAddressInfo.host + " port :" + redirectAddressInfo.port);
                 connect(redirectAddressInfo.host ,redirectAddressInfo.port);
                 return;
             } catch (IOException | SQLException e) {
                 MariaDbConnection.removeRediectHost(key);
-                System.out.println("remove redirection host  :" + redirectAddressInfo.host + " port :"
-                        + redirectAddressInfo.port + " because the info is invalid");
                 redirectAddressInfo = null;
                 redirectStatus = RedirecStatus.redirect_none;
             }
         }
         try {
             //if reconnect, first use redirection host 
-            System.out.println("normal connect");
             connect((currentHost != null) ? currentHost.host : null,
                         (currentHost != null) ? currentHost.port : 3306);
         } catch (IOException ioException) {
@@ -487,7 +483,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
             if (options.useSsl && options.redirection && redirectAddressInfo != null && ( 
                 redirectAddressInfo.host != currentHost.host || redirectAddressInfo.port != currentHost.port)
                    && redirectStatus == RedirecStatus.redirecting) {
-                System.out.println("in Redirection stage");
                 socketToServer =  SocketFactory.getDefault().createSocket();
                 if (options.socketTimeout != null) socketToServer.setSoTimeout(options.socketTimeout);
                 socketToServer = initializeSocketOption(socketToServer);
@@ -514,10 +509,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
                     String key = urlParser.getUsername() + "_" + currentHost.host + "_" + currentHost.port;
                     MariaDbConnection.putNewRediectHost(key, redirectAddressInfo, reUser);
                     redirectStatus = RedirecStatus.redirected;
-                    System.out.println("Redirection Success, put host " + redirectAddressInfo.host 
-                            + " port : " + redirectAddressInfo.port + "into map.");
                 } catch (IOException | SQLException e) {
-                    System.out.println("Redirection failure" + e.getMessage());
                     socket = (Socket)objList.get(0);
                     reader = (PacketInputStream)objList.get(1);
                     writer = (PacketOutputStream)objList.get(2);
@@ -857,8 +849,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
             }
             
             if (redirectStatus == RedirecStatus.redirecting || redirectStatus == RedirecStatus.redirected) {
-                System.out.println("user name is " + reUser + " passwd is " + password + "host "
-                        + redirectAddressInfo.host + "port " + redirectAddressInfo.port);
                 authentication(exchangeCharset, clientCapabilities, packetSeq, greetingPacket, writer,
                         reader, reUser, redirectAddressInfo);             
                 objList.add(socket);
