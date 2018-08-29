@@ -460,7 +460,6 @@ public abstract class AbstractConnectProtocol implements Protocol {
             socket = Utils.createSocket(urlParser, host);
             if (options.socketTimeout != null) socket.setSoTimeout(options.socketTimeout);
             socket = initializeSocketOption(socket);
-//            initializeSocketOption();
             // Bind the socket to a particular interface if the connection property
             // localSocketAddress has been defined.
             if (options.localSocketAddress != null) {
@@ -480,7 +479,7 @@ public abstract class AbstractConnectProtocol implements Protocol {
             socket = (Socket)objList.get(0);
             reader = (PacketInputStream)objList.get(1);
             writer = (PacketOutputStream)objList.get(2);
-            if (options.useSsl && options.redirection && redirectAddressInfo != null && ( 
+            if (options.useSsl && !options.disableRedirect && redirectAddressInfo != null && ( 
                 redirectAddressInfo.host != currentHost.host || redirectAddressInfo.port != currentHost.port)
                    && redirectStatus == RedirecStatus.redirecting) {
                 socketToServer =  SocketFactory.getDefault().createSocket();

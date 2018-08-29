@@ -120,7 +120,7 @@ public class Options implements Cloneable {
     public boolean enablePacketDebug;
     public boolean useBulkStmts = true;
     public boolean disableSslHostnameVerification;
-    public boolean redirection = false;
+    public boolean disableRedirect = false;
     public boolean autocommit = true;
 
     //logging options
@@ -214,7 +214,7 @@ public class Options implements Cloneable {
         if (enablePacketDebug != opt.enablePacketDebug) return false;
         if (useBulkStmts != opt.useBulkStmts) return false;
         if (disableSslHostnameVerification != opt.disableSslHostnameVerification) return false;
-        if (redirection != opt.redirection) return false;
+        if (disableRedirect != opt.disableRedirect) return false;
         if (log != opt.log) return false;
         if (profileSql != opt.profileSql) return false;
         if (assureReadOnly != opt.assureReadOnly) return false;
@@ -343,7 +343,7 @@ public class Options implements Cloneable {
         result = 31 * result + (enablePacketDebug ? 1 : 0);
         result = 31 * result + (useBulkStmts ? 1 : 0);
         result = 31 * result + (disableSslHostnameVerification ? 1 : 0);
-        result = 31 * result + (redirection ? 1 : 0);
+        result = 31 * result + (disableRedirect ? 1 : 0);
         result = 31 * result + (log ? 1 : 0);
         result = 31 * result + (profileSql ? 1 : 0);
         result = 31 * result + maxQuerySizeToLog;
